@@ -3,6 +3,7 @@ import time
 import requests
 import json
 import random
+import urllib.parse
 
 def load_env():
     if os.path.exists('.env'):
@@ -15,14 +16,9 @@ def load_env():
 load_env()
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-PROJECT_ID = os.environ.get('WEBSIM_PROJECT_ID')
 
 if not BOT_TOKEN or BOT_TOKEN == 'YOUR_BOT_TOKEN_HERE':
     print("Error: Please set your BOT_TOKEN in the .env file.")
-    exit()
-
-if not PROJECT_ID:
-    print("Error: Please set WEBSIM_PROJECT_ID in the .env file.")
     exit()
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -40,7 +36,7 @@ MESSAGES = {
             "Asking the AI gods... 🤖"
         ],
         'error': "Sorry, I couldn't generate that image. Please try again.",
-        'caption': "✨ Here is your dream:",
+        'caption': "✨ Here is your imagination turned into reality :",
         'prompt_needed': "Please select a language first."
     },
     'ar': {
@@ -53,7 +49,7 @@ MESSAGES = {
             "جارٍ المعالجة الذكية... 🤖"
         ],
         'error': "عذراً، لم أتمكن من إنشاء الصورة. حاول مرة أخرى.",
-        'caption': "✨ ها هو حلمك:",
+        'caption': "✨ ها هو خيالك وقد تحوّل إلى واقع:",
         'prompt_needed': "الرجاء اختيار اللغة أولاً."
     }
 }
@@ -76,31 +72,22 @@ def google_translate(text, target_lang="en"):
         print(f"Translation error: {e}")
     return text
 
-def generate_image_url(prompt):
-    url = "https://api.websim.com/api/v1/inference/run_image_generation"
+def generate_image(prompt):
     
     translated_prompt = google_translate(prompt, "en")
     print(f"Generating for: {translated_prompt}")
-
-    payload = {
-        "project_id": PROJECT_ID,
-        "prompt": translated_prompt,
-        "aspect_ratio": "1:1"
-    }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 12; SM-A025F Build/SP1A.210812.016) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.7151.61 Mobile Safari/537.36",
-        "Content-Type": "application/json",
-        "origin": "https://websim.com",
-        "referer": "https://websim.com/"
-    }
-
+    
+    encoded_prompt = urllib.parse.quote(translated_prompt)
+    
+    seed = random.randint(0, 100000)
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?seed={seed}&width=1024&height=1024&nologo=true"
+    
     try:
-        response = requests.post(url, json=payload, headers=headers)
-        data = response.json()
-        if 'url' in data:
-            return data['url']
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            return response.content
         else:
-            print(f"API Error: {data}")
+            print(f"API Error: {response.status_code} - {response.text}")
     except Exception as e:
         print(f"Generation Error: {e}")
     return None
@@ -121,9 +108,15 @@ def send_message(chat_id, text, reply_markup=None):
         payload['reply_markup'] = json.dumps(reply_markup)
     requests.post(url, json=payload)
 
-def send_photo(chat_id, photo_url, caption):
+def send_photo(chat_id, photo_data, caption):
     url = f"{BASE_URL}/sendPhoto"
-    requests.post(url, json={'chat_id': chat_id, 'photo': photo_url, 'caption': caption})
+    
+    if isinstance(photo_data, bytes):
+        files = {'photo': ('image.jpg', photo_data, 'image/jpeg')}
+        data = {'chat_id': chat_id, 'caption': caption}
+        requests.post(url, data=data, files=files)
+    else:
+        requests.post(url, json={'chat_id': chat_id, 'photo': photo_data, 'caption': caption})
 
 def answer_callback_query(callback_query_id, text=None):
     url = f"{BASE_URL}/answerCallbackQuery"
@@ -183,10 +176,10 @@ def main():
                             loading_msg = random.choice(MESSAGES[lang]['generating'])
                             send_message(chat_id, loading_msg)
                             
-                            image_url = generate_image_url(text)
+                            image_data = generate_image(text)
                             
-                            if image_url:
-                                send_photo(chat_id, image_url, f"{MESSAGES[lang]['caption']} {text}")
+                            if image_data:
+                                send_photo(chat_id, image_data, f"{MESSAGES[lang]['caption']} {text}")
                             else:
                                 send_message(chat_id, MESSAGES[lang]['error'])
             
